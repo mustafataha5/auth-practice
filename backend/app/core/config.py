@@ -5,6 +5,8 @@ from pathlib import Path
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
+from pydantic import Field, SecretStr
+
 
 # auth-practice/backend/app/core/config.py
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -20,6 +22,20 @@ class Settings(BaseSettings):
 
     DB_HOST: str = "localhost"
     DB_PORT: int = 5433
+
+    # Add these fields inside Settings; keep your existing fields.
+    JWT_SECRET_KEY: SecretStr = Field(
+        min_length=32,
+    )
+
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ISSUER: str = "auth-practice"
+    JWT_AUDIENCE: str = "auth-practice-api"
+
+    ACCESS_TOKEN_MINUTES: int = 15
+    REFRESH_TOKEN_DAYS: int = 7
+
+    # In production, use DEBUG=False and HTTPS.
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",

@@ -5,7 +5,10 @@ from app.core.config import settings
 from app.core.tokens import decode_access_token
 
 BASE = "/api/v1/auth"
-CSRF_HEADERS = {"X-CSRF-Intent": "1"}
+CSRF_HEADERS = {
+    "X-CSRF-Intent": "1",
+    "Origin": "http://localhost:4200",
+}
 
 
 def create_account(client):
@@ -189,3 +192,47 @@ def test_invalid_jwt_rejected(client):
     )
 
     assert response.status_code == 401
+
+
+
+def test_refresh_rejects_untrusted_origin(client):
+    create_account(client)
+    do_login(client)
+
+    response = client.post(
+        f"{BASE}/refresh",
+        headers={
+            "X-CSRF-Intent": "1",
+            "Origin": "https://evil.example",
+        },
+    )
+
+    assert response.status_code == 403
+
+
+def test_refresh_rejects_missing_origin(client):
+    create_account(client)
+    do_login(client)
+
+    response = client.post(
+        f"{BASE}/refresh",
+        headers={"X-CSRF-Intent": "1"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_logout_rejects_cross_site_request(client):
+    create_account(client)
+    do_login(client)
+
+    response = client.post(
+        f"{BASE}/logout",
+        headers={
+            **CSRF_HEADERS,
+            "Sec-Fetch-Site": "cross-site",
+        },
+    )
+
+    assert response.status_code == 403
+

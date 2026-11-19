@@ -5,6 +5,12 @@ from datetime import timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+
+from app.models.refresh_token_history import (
+    RefreshTokenHistory,
+)
+
+from app.core.tokens import hash_refresh_token
 from app.core.config import settings
 from app.core.security import verify_password
 from app.core.tokens import (
@@ -90,6 +96,7 @@ def login_user(
     )
 
 
+
 def refresh_user_session(
     db: Session,
     raw_token: str,
@@ -101,7 +108,7 @@ def refresh_user_session(
     except (ValueError, AttributeError):
         raise InvalidSessionError() from None
 
-    # PostgreSQL locks this row until transaction end.
+    # PostgreSQL serializes rotations for this session.
     session = db.scalar(
         select(RefreshSession)
         .where(RefreshSession.id == session_id)
@@ -109,41 +116,74 @@ def refresh_user_session(
     )
 
     if session is None:
+        db.rollback()
         raise InvalidSessionError()
 
     if session.revoked:
         db.rollback()
         raise InvalidSessionError()
 
-    if session.expires_at <= utc_now():
-        session.revoked = True
-        db.commit()
-        raise InvalidSessionError()
-
-    # Detect reuse of an old refresh token.
-    if not verify_refresh_secret(
-        secret, session.token_hash
-    ):
-        session.revoked = True
-        db.commit()
-        raise InvalidSessionError()
-
-    user = db.get(User, session.user_id)
-
-    if user is None or not user.is_active:
-        session.revoked = True
-        db.commit()
-        raise InvalidSessionError()
-
-    # Rotate the secret, preserving the session ID.
-    new_token, new_hash = generate_refresh_token(
-        session.id
-    )
-
-    session.token_hash = new_hash
+    incoming_hash = hash_refresh_token(secret)
 
     try:
+        # Case 1: Incorrect secret.
+        if not verify_refresh_secret(
+            secret,
+            session.token_hash,
+        ):
+            known_replay = db.scalar(
+                select(RefreshTokenHistory.id)
+                .where(
+                    RefreshTokenHistory.session_id
+                    == session.id,
+                    RefreshTokenHistory.token_hash
+                    == incoming_hash,
+                )
+            )
+
+            if known_replay is not None:
+                # Previously consumed valid token.
+                # Revoke the affected session.
+                session.revoked = True
+                db.commit()
+            else:
+                # Unknown secret: do not log out user.
+                db.rollback()
+
+            raise InvalidSessionError()
+
+        # Case 2: Expired session.
+        if session.expires_at <= utc_now():
+            session.revoked = True
+            db.commit()
+            raise InvalidSessionError()
+
+        user = db.get(User, session.user_id)
+
+        if user is None or not user.is_active:
+            session.revoked = True
+            db.commit()
+            raise InvalidSessionError()
+
+        # Remember the old token before rotation.
+        db.add(
+            RefreshTokenHistory(
+                session_id=session.id,
+                token_hash=session.token_hash,
+            )
+        )
+
+        new_token, new_hash = generate_refresh_token(
+            session.id
+        )
+
+        session.token_hash = new_hash
+
+        # Commit history and new secret atomically.
         db.commit()
+
+    except InvalidSessionError:
+        raise
     except Exception:
         db.rollback()
         raise
@@ -152,6 +192,7 @@ def refresh_user_session(
         build_access_token(user.id, session.id),
         new_token,
     )
+
 
 
 def logout_user_session(

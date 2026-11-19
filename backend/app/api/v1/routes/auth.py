@@ -8,6 +8,7 @@ from typing import Annotated
 from fastapi import Cookie, Header, Response
 from fastapi.responses import JSONResponse
 from app.api.dependencies import get_current_user
+from app.api.csrf import require_csrf
 from app.core.cookies import (
     COOKIE_NAME,
     set_refresh_cookie,
@@ -35,6 +36,11 @@ from app.services.auth_service import (
     DefaultRoleNotFoundError,
 )
 
+from app.core.rate_limit import (
+    login_rate_limit,
+    registration_rate_limit,
+)
+
 router = APIRouter(
     prefix="/auth",
     tags=["Authentication"],
@@ -45,6 +51,7 @@ router = APIRouter(
     "/register",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(registration_rate_limit)],
 )
 def register(
     data: UserRegister,
@@ -67,37 +74,38 @@ def register(
 
 
 
+#### delete this funcation replaced by crsf_required
+# def require_cookie_request(
+#     x_csrf_intent: Annotated[
+#         str | None,
+#         Header(alias="X-CSRF-Intent"),
+#     ] = None,
+#     origin: Annotated[
+#         str | None,
+#         Header(),
+#     ] = None,
+# ):
+#     if x_csrf_intent != "1":
+#         raise HTTPException(
+#             status_code=403,
+#             detail="Missing CSRF request header",
+#         )
 
-def require_cookie_request(
-    x_csrf_intent: Annotated[
-        str | None,
-        Header(alias="X-CSRF-Intent"),
-    ] = None,
-    origin: Annotated[
-        str | None,
-        Header(),
-    ] = None,
-):
-    if x_csrf_intent != "1":
-        raise HTTPException(
-            status_code=403,
-            detail="Missing CSRF request header",
-        )
-
-    # Only allow these browser origins for local practice.
-    if origin is not None and origin not in {
-        "http://localhost:4200",
-        "http://localhost:8000",
-    }:
-        raise HTTPException(
-            status_code=403,
-            detail="Disallowed origin",
-        )
+#     # Only allow these browser origins for local practice.
+#     if origin is not None and origin not in {
+#         "http://localhost:4200",
+#         "http://localhost:8000",
+#     }:
+#         raise HTTPException(
+#             status_code=403,
+#             detail="Disallowed origin",
+#         )
 
 
 @router.post(
     "/login",
     response_model=TokenResponse,
+    dependencies=[Depends(login_rate_limit)],
 )
 def login(
     data: LoginRequest,
@@ -122,7 +130,7 @@ def login(
 @router.post(
     "/refresh",
     response_model=TokenResponse,
-    dependencies=[Depends(require_cookie_request)],
+    dependencies=[Depends(require_csrf)],
 )
 def refresh(
     response: Response,
@@ -161,7 +169,7 @@ def refresh(
 @router.post(
     "/logout",
     response_model=LogoutResponse,
-    dependencies=[Depends(require_cookie_request)],
+    dependencies=[Depends(require_csrf)],
 )
 def logout(
     response: Response,

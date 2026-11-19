@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     DB_HOST: str = "localhost"
     DB_PORT: int = 5433
-
+    REDIS_URL: str = "redis://localhost:6379/0"
     # Add these fields inside Settings; keep your existing fields.
     JWT_SECRET_KEY: SecretStr = Field(
         min_length=32,
@@ -34,7 +34,11 @@ class Settings(BaseSettings):
 
     ACCESS_TOKEN_MINUTES: int = 15
     REFRESH_TOKEN_DAYS: int = 7
-
+    
+    CSRF_ALLOWED_ORIGINS: list[str] = [
+    "http://localhost:4200",
+    "http://localhost:8000",
+]
     # In production, use DEBUG=False and HTTPS.
 
     model_config = SettingsConfigDict(
